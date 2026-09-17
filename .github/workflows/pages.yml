@@ -1,0 +1,52 @@
+name: 部署查詢網頁
+
+on:
+  push:
+    branches: [main]
+    paths: ["web/**", "tests/**", "news_bot/**", "config/**", ".github/workflows/pages.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: test                 # 測試通過才部署
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 注入 Supabase 連線設定
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          REQUIRE_LOGIN: ${{ vars.REQUIRE_LOGIN }}
+        run: |
+          mkdir -p _site && cp -r web/* _site/
+          python3 - <<'PY'
+          import os, pathlib
+          p = pathlib.Path("_site/index.html")
+          s = p.read_text(encoding="utf-8")
+          for k in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "REQUIRE_LOGIN"):
+              v = os.environ.get(k, "")
+              if v:
+                  s = s.replace(f"__{k}__", v)
+          p.write_text(s, encoding="utf-8")
+          print("已注入：", [k for k in ("SUPABASE_URL","SUPABASE_ANON_KEY","REQUIRE_LOGIN") if os.environ.get(k)])
+          PY
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4

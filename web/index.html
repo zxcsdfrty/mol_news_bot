@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>勞動部新聞查詢</title>
+<meta name="robots" content="noindex">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --bg:#f5f6f8;--card:#fff;--ink:#1d2330;--muted:#667085;--line:#e3e6eb;
+  --brand:#1f5fa8;--brand-soft:#e7eff9;--neg:#c0392b;--neg-soft:#fbeaea;
+  --pos:#1e8449;--pos-soft:#e8f6ee;--mark:#fff1a8;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#12151b;--card:#1b2029;--ink:#e6e9ef;--muted:#9aa3b2;--line:#2c3340;
+  --brand:#6ea8ec;--brand-soft:#1f2c3d;--neg:#ef7a6d;--neg-soft:#3a2323;
+  --pos:#5fcf8e;--pos-soft:#1c3327;--mark:#5a4d12;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;line-height:1.6}
+header{background:var(--brand);color:#fff;padding:14px 16px}
+header h1{margin:0;font-size:1.2rem;font-weight:600}
+header small{opacity:.85}
+main{max-width:1080px;margin:0 auto;padding:16px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+input,select,button{font:inherit;color:var(--ink);background:var(--card);
+  border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+input[type=search]{flex:1 1 260px;min-width:0}
+button{cursor:pointer}
+button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{border-radius:999px;padding:3px 12px;font-size:.88rem}
+.chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.label{color:var(--muted);font-size:.85rem;margin-right:2px}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.stat{border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer}
+.stat b{display:block;font-size:.9rem}
+.bar{height:6px;background:var(--brand-soft);border-radius:3px;margin-top:6px;overflow:hidden;display:flex}
+.bar i{display:block;height:100%;background:var(--brand)}
+.bar i.n{background:var(--neg)}
+.stat span{color:var(--muted);font-size:.8rem}
+.meta{color:var(--muted);font-size:.85rem}
+.item{padding:12px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item a.t{color:var(--ink);font-weight:600;text-decoration:none;font-size:1.02rem}
+.item a.t:hover{color:var(--brand);text-decoration:underline}
+.item p{margin:4px 0;color:var(--muted);font-size:.92rem}
+.tag{display:inline-block;font-size:.75rem;border-radius:4px;padding:0 6px;margin-right:4px;
+  background:var(--brand-soft);color:var(--brand)}
+.tag.neg{background:var(--neg-soft);color:var(--neg)}
+.tag.pos{background:var(--pos-soft);color:var(--pos)}
+mark{background:var(--mark);color:inherit;padding:0 1px}
+.pager{display:flex;justify-content:center;gap:8px;margin-top:12px;align-items:center}
+.empty{text-align:center;color:var(--muted);padding:30px 0}
+#login{max-width:420px;margin:40px auto}
+.hidden{display:none!important}
+@media (max-width:600px){.row>*{flex:1 1 100%}}
+</style>
+</head>
+<body>
+<header>
+  <h1>勞動部新聞查詢系統</h1>
+  <small>新聞聯絡室｜每 30 分鐘自動收錄</small>
+</header>
+
+<main>
+  <section id="login" class="panel hidden">
+    <h3 style="margin-top:0">請先登入</h3>
+    <p class="meta">輸入公務信箱，系統會寄送登入連結。</p>
+    <div class="row">
+      <input id="email" type="email" placeholder="name@mol.gov.tw">
+      <button class="primary" id="sendLink">寄送登入連結</button>
+    </div>
+    <p id="loginMsg" class="meta"></p>
+  </section>
+
+  <div id="app" class="hidden">
+    <section class="panel">
+      <div class="row">
+        <input id="q" type="search" placeholder="關鍵字（多個字詞以空白分隔，需全部符合），例：勞保 年金">
+        <button class="primary" id="go">搜尋</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <span class="label">期間</span>
+        <select id="range">
+          <option value="1">近 24 小時</option>
+          <option value="7" selected>近 7 天</option>
+          <option value="30">近 30 天</option>
+          <option value="90">近 3 個月</option>
+          <option value="365">近 1 年</option>
+          <option value="custom">自訂</option>
+          <option value="all">全部</option>
+        </select>
+        <input id="from" type="date" class="hidden">
+        <input id="to" type="date" class="hidden">
+        <span class="label">傾向</span>
+        <select id="sentiment">
+          <option value="">全部</option><option>負面</option><option>中性</option><option>正面</option>
+        </select>
+        <span class="label">來源</span>
+        <select id="source"><option value="">全部</option></select>
+        <label class="meta"><input type="checkbox" id="dups"> 含他台重複報導</label>
+        <button id="csv">匯出 CSV</button>
+      </div>
+      <div class="chips" id="topics"></div>
+    </section>
+
+    <section class="panel">
+      <div class="row" style="justify-content:space-between">
+        <b>議題分佈（所選期間）</b>
+        <span class="meta">藍＝則數，紅＝其中負面，點選可篩選</span>
+      </div>
+      <div class="stats" id="stats" style="margin-top:8px"></div>
+    </section>
+
+    <section class="panel">
+      <div class="meta" id="summary"></div>
+      <div id="list"></div>
+      <div class="pager" id="pager"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+/* ================== 設定 ================== */
+// Supabase → Project Settings → API 取得。anon key 本來就設計為可公開（搭配 RLS 唯讀）。
+// 部署時由 GitHub Actions 自動以 repo Variables 取代 __SUPABASE_URL__ / __SUPABASE_ANON_KEY__；
+// 本機直接開啟時維持佔位字串 → 自動進入示範模式。
+const SUPABASE_URL = "__SUPABASE_URL__".startsWith("__") ? "" : "__SUPABASE_URL__";
+const SUPABASE_ANON_KEY = "__SUPABASE_ANON_KEY__";
+const REQUIRE_LOGIN = "__REQUIRE_LOGIN__" === "true";  // 採用 schema.sql「方案 B」時將 repo Variable REQUIRE_LOGIN 設為 true
+const PAGE_SIZE = 20;
+// 與 config/keywords.yaml 的 topics 保持一致
+const TOPICS = ["勞工保險","勞工退休金","薪資工時","勞資關係","職業安全",
+                "就業服務","職業訓練","移工","性別平等與育兒","勞動權益其他"];
+/* ========================================= */
+
+const DEMO = !SUPABASE_URL;
+const sb = DEMO ? null : supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+const state = { page: 1, topics: new Set(), lastRows: [] };
+
+/* ---------- 示範資料（未設定 Supabase 時使用，方便先看畫面） ---------- */
+const DEMO_ROWS = (() => {
+  const now = Date.now(), h = 3600e3;
+  const s = [
+    ["勞動部公布明年基本工資調漲方案 月薪、時薪同步調升","審議會今日決議，月薪與時薪均調漲，勞動部長洪申翰表示將持續照顧基層勞工。","中央社",["薪資工時"],"正面",3],
+    ["勞保基金財務吃緊 立委質疑撥補力道不足","立法院社福委員會今日質詢，立委痛批勞保年金改革進度緩慢。","自由時報",["勞工保險"],"負面",5],
+    ["工地墜落意外奪一命 職安署勒令停工","新北市一處建案工地發生墜落事故，職安署到場勘查後勒令停工。","聯合新聞網",["職業安全"],"負面",9],
+    ["移工直聘新制上路 仲介費負擔可望減輕","勞動部擴大直聘服務，協助雇主與移工媒合。","公視新聞網",["移工"],"正面",20],
+    ["育嬰留職停薪可按日申請 家長彈性更高","勞動部表示新制上路後，育嬰假申請更有彈性。","經濟日報",["性別平等與育兒"],"正面",30],
+    ["勞退基金上半年收益創新高","勞動基金運用局公布最新績效，勞退新制基金收益創新高。","工商時報",["勞工退休金"],"正面",50],
+    ["科技業傳無薪假 勞動部啟動通報監控","減班休息通報人數增加，勞動部表示將加強勞動檢查。","中時新聞網",["勞資關係","就業服務"],"負面",70],
+  ];
+  return s.map((r, i) => ({ id: i + 1, title: r[0], summary: r[1], source: r[2], topics: r[3],
+    sentiment: r[4], published_at: new Date(now - r[5] * h).toISOString(),
+    url: "#", score: 30, dup_of: null }));
+})();
+
+function demoSearch(p) {
+  const terms = (p.q || "").split(/\s+/).filter(Boolean);
+  let rows = DEMO_ROWS.filter(r =>
+    terms.every(t => (r.title + r.summary).includes(t)) &&
+    (!p.p_topics || !p.p_topics.length || r.topics.some(t => p.p_topics.includes(t))) &&
+    (!p.p_sentiment || r.sentiment === p.p_sentiment) &&
+    (!p.p_source || r.source === p.p_source) &&
+    (!p.date_from || r.published_at >= p.date_from) &&
+    (!p.date_to || r.published_at < p.date_to));
+  const total = rows.length;
+  rows = rows.slice((p.page_no - 1) * p.page_size, p.page_no * p.page_size);
+  return rows.map(r => ({ ...r, total_count: total }));
+}
+
+/* ---------- 資料存取 ---------- */
+function params(page = state.page, size = PAGE_SIZE) {
+  const r = $("range").value;
+  let from = null, to = null;
+  if (r === "custom") {
+    from = $("from").value ? new Date($("from").value + "T00:00:00+08:00").toISOString() : null;
+    to = $("to").value ? new Date(new Date($("to").value + "T00:00:00+08:00").getTime() + 864e5).toISOString() : null;
+  } else if (r !== "all") {
+    from = new Date(Date.now() - Number(r) * 864e5).toISOString();
+  }
+  return {
+    q: $("q").value.trim(),
+    p_topics: state.topics.size ? [...state.topics] : null,
+    p_sentiment: $("sentiment").value || null,
+    p_source: $("source").value || null,
+    date_from: from, date_to: to,
+    include_dups: $("dups").checked,
+    page_size: size, page_no: page,
+  };
+}
+
+async function rpc(fn, p) {
+  if (DEMO) {
+    if (fn === "search_news") return demoSearch(p);
+    if (fn === "source_list") {
+      const m = {}; DEMO_ROWS.forEach(r => m[r.source] = (m[r.source] || 0) + 1);
+      return Object.entries(m).map(([source, cnt]) => ({ source, cnt }));
+    }
+    if (fn === "topic_stats") {
+      const m = {};
+      DEMO_ROWS.filter(r => !p.date_from || r.published_at >= p.date_from).forEach(r => r.topics.forEach(t => {
+        m[t] ??= { topic: t, cnt: 0, negative: 0 }; m[t].cnt++; if (r.sentiment === "負面") m[t].negative++;
+      }));
+      return Object.values(m).sort((a, b) => b.cnt - a.cnt);
+    }
+  }
+  const { data, error } = await sb.rpc(fn, p);
+  if (error) throw error;
+  return data || [];
+}
+
+/* ---------- 畫面 ---------- */
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function hl(text, terms) {
+  let out = esc(text);
+  terms.forEach(t => {
+    if (!t) return;
+    const re = new RegExp(esc(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+    out = out.replace(re, m => `<mark>${m}</mark>`);
+  });
+  return out;
+}
+const fmt = iso => new Date(iso).toLocaleString("zh-TW",
+  { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+
+function renderTopics() {
+  $("topics").innerHTML = '<span class="label">議題</span>' + TOPICS.map(t =>
+    `<button class="chip ${state.topics.has(t) ? "on" : ""}" data-t="${esc(t)}">${esc(t)}</button>`).join("");
+  $("topics").querySelectorAll("button").forEach(b => b.onclick = () => {
+    const t = b.dataset.t;
+    state.topics.has(t) ? state.topics.delete(t) : state.topics.add(t);
+    search(1);
+  });
+}
+
+async function renderStats() {
+  const p = params();
+  const rows = await rpc("topic_stats", {
+    date_from: p.date_from || "2000-01-01T00:00:00Z",
+    date_to: p.date_to || new Date(Date.now() + 864e5).toISOString(),
+  });
+  const max = Math.max(1, ...rows.map(r => r.cnt));
+  $("stats").innerHTML = rows.length ? rows.map(r => `
+    <div class="stat" data-t="${esc(r.topic)}">
+      <b>${esc(r.topic)}</b><span>${r.cnt} 則・負面 ${r.negative}</span>
+      <div class="bar" style="width:${Math.max(8, r.cnt / max * 100)}%">
+        <i style="width:${(r.cnt - r.negative) / r.cnt * 100}%"></i><i class="n" style="width:${r.negative / r.cnt * 100}%"></i>
+      </div>
+    </div>`).join("") : '<span class="meta">此期間尚無資料</span>';
+  $("stats").querySelectorAll(".stat").forEach(el => el.onclick = () => {
+    state.topics = new Set([el.dataset.t]); search(1);
+  });
+}
+
+async function search(page = 1) {
+  state.page = page;
+  renderTopics();
+  $("list").innerHTML = '<div class="empty">查詢中…</div>';
+  try {
+    const p = params(page);
+    const rows = await rpc("search_news", p);
+    state.lastRows = rows;
+    const total = rows[0]?.total_count || 0;
+    const terms = p.q.split(/\s+/).filter(Boolean);
+    $("summary").textContent = `共 ${total} 則` + (DEMO ? "（示範資料，尚未連接資料庫）" : "");
+    $("list").innerHTML = rows.length ? rows.map(r => `
+      <div class="item">
+        <a class="t" href="${esc(r.url)}" target="_blank" rel="noopener">${hl(r.title, terms)}</a>
+        <div class="meta">${esc(r.source)}｜${fmt(r.published_at)}
+          ${r.dup_of ? '｜<span class="tag">重複報導</span>' : ""}</div>
+        ${r.summary ? `<p>${hl(r.summary, terms)}</p>` : ""}
+        <div>${(r.topics || []).map(t => `<span class="tag">${esc(t)}</span>`).join("")}
+          <span class="tag ${r.sentiment === "負面" ? "neg" : r.sentiment === "正面" ? "pos" : ""}">${esc(r.sentiment)}</span></div>
+      </div>`).join("") : '<div class="empty">查無符合的新聞</div>';
+    const pages = Math.ceil(total / PAGE_SIZE);
+    $("pager").innerHTML = pages > 1 ? `
+      <button ${page <= 1 ? "disabled" : ""} id="prev">上一頁</button>
+      <span class="meta">${page} / ${pages}</span>
+      <button ${page >= pages ? "disabled" : ""} id="next">下一頁</button>` : "";
+    if (pages > 1) { $("prev").onclick = () => search(page - 1); $("next").onclick = () => search(page + 1); }
+    renderStats();
+  } catch (e) {
+    $("list").innerHTML = `<div class="empty">查詢失敗：${esc(e.message || e)}</div>`;
+  }
+}
+
+async function exportCsv() {
+  // 匯出目前條件下的全部結果（最多 2000 筆）
+  const all = [];
+  for (let pg = 1; pg <= 20; pg++) {
+    const rows = await rpc("search_news", params(pg, 100));
+    all.push(...rows);
+    if (rows.length < 100) break;
+  }
+  const head = ["發布時間", "來源", "標題", "摘要", "議題", "傾向", "連結"];
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [head.join(",")].concat(all.map(r =>
+    [fmt(r.published_at), r.source, r.title, r.summary, (r.topics || []).join("、"), r.sentiment, r.url].map(q).join(",")));
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `勞動部新聞_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+async function init() {
+  $("app").classList.remove("hidden");
+  const src = await rpc("source_list", {});
+  $("source").innerHTML += src.map(s => `<option>${esc(s.source)}</option>`).join("");
+  $("go").onclick = () => search(1);
+  $("q").onkeydown = e => { if (e.key === "Enter") search(1); };
+  ["sentiment", "source", "dups", "from", "to"].forEach(id => $(id).onchange = () => search(1));
+  $("range").onchange = () => {
+    const c = $("range").value === "custom";
+    $("from").classList.toggle("hidden", !c); $("to").classList.toggle("hidden", !c);
+    search(1);
+  };
+  $("csv").onclick = exportCsv;
+  search(1);
+}
+
+(async () => {
+  if (!DEMO && REQUIRE_LOGIN) {
+    const { data } = await sb.auth.getSession();
+    if (!data.session) {
+      $("login").classList.remove("hidden");
+      $("sendLink").onclick = async () => {
+        const { error } = await sb.auth.signInWithOtp({
+          email: $("email").value.trim(),
+          options: { emailRedirectTo: location.href.split("#")[0] },
+        });
+        $("loginMsg").textContent = error ? `失敗：${error.message}` : "已寄出，請至信箱點選登入連結。";
+      };
+      sb.auth.onAuthStateChange((_e, s) => { if (s) location.reload(); });
+      return;
+    }
+  }
+  init();
+})();
+</script>
+</body>
+</html>
