@@ -71,17 +71,36 @@ def test_dedupe_prefers_publisher_url():
     assert len(out) == 1 and "cna" in out[0].url
 
 
-def test_message_split(monkeypatch):
-    rows = [{"id": i, "title": f"勞動部新聞標題 {i} <測試&跳脫>", "summary": "摘" * 200,
+def test_message_format(monkeypatch):
+    """廠商格式：一則新聞一封訊息，標題後標來源，裸網址供 Telegram 產生預覽卡片。"""
+    rows = [{"id": i, "title": f"勞動部新聞標題 {i} <測試&跳脫>", "summary": "摘" * 400,
              "url": f"https://x/{i}?a=1&b=2", "source": "中央社",
              "published_at": datetime.now(TW).isoformat(), "topics": ["勞工保險"],
              "sentiment": "負面"} for i in range(40)]
     msgs = notifier.build_messages(rows)
-    assert len(msgs) > 1
-    assert all(len(m) <= 4096 for m, _ in msgs)
+    assert len(msgs) == 40                                  # 不再合併成多則新聞一封
+    assert all(len(ids) == 1 for _, ids in msgs)
     assert sorted(i for _, ids in msgs for i in ids) == list(range(40))
-    assert "&lt;測試&amp;跳脫&gt;" in msgs[0][0]
-    assert "a=1&amp;b=2" in msgs[0][0]
+    assert all(len(m) <= 4096 for m, _ in msgs)
+
+    lines = msgs[0][0].split("\n")
+    assert lines[0] == "【新聞通報】"
+    assert lines[1].endswith(" (中央社)</b>")                # 標題後方標示來源
+    assert lines[2] == "https://x/0?a=1&amp;b=2"            # 裸網址，不做成超連結
+    assert lines[3].startswith("　")                         # 摘要以全形空格縮排
+    assert "&lt;測試&amp;跳脫&gt;" in lines[1]               # HTML 跳脫
+    assert "摘" * 300 in lines[3] and "摘" * 301 not in lines[3]  # 摘要截斷於上限
+    # 議題與輿情傾向只進資料庫，不進推播訊息
+    assert "🔴" not in msgs[0][0] and "勞工保險" not in msgs[0][0]
+
+
+def test_message_format_optional_fields():
+    """缺少來源或摘要時，不應留下多餘的括號或空行。"""
+    rows = [{"id": 1, "title": "勞動部公布基本工資", "summary": "", "url": "https://x/1",
+             "source": ""}]
+    text, ids = notifier.build_messages(rows)[0]
+    assert text == "【新聞通報】\n<b>勞動部公布基本工資</b>\nhttps://x/1"
+    assert ids == [1]
 
 
 def test_quiet_hours():
