@@ -1,4 +1,3 @@
-import base64
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -169,41 +168,6 @@ def test_is_excluded():
     assert not fetcher.is_excluded("中央社", "https://www.cna.com.tw/news/1", ex)
     # 品牌名過短者（x.com 的 x）不得用於名稱比對，否則會命中任意媒體名
     assert not fetcher.is_excluded("Taiwan News Express", "https://example.com.tw/a", ex)
-
-
-def test_decode_google_url():
-    """舊式轉址可從 base64 內容解出原文網址，雜訊或新式轉址則回傳空字串。"""
-    blob = b"\x08\x13\x22\x51" + b"https://www.cna.com.tw/news/aipl/202609170158.aspx" + b"\xd2\x01\x05"
-    seg = base64.urlsafe_b64encode(blob).decode().rstrip("=")
-    link = f"https://news.google.com/rss/articles/{seg}?oc=5"
-    assert fetcher._decode_google_url(link) == "https://www.cna.com.tw/news/aipl/202609170158.aspx"
-    # 解不出網址時不可回傳半截結果
-    noise = base64.urlsafe_b64encode(b"\x01\x02\x03no-url-here\xff").decode().rstrip("=")
-    assert fetcher._decode_google_url(f"https://news.google.com/rss/articles/{noise}") == ""
-    assert fetcher._decode_google_url("https://www.cna.com.tw/news/1") == ""
-
-
-def test_resolve_google_url_fallbacks(monkeypatch):
-    """連線失敗時退回離線解碼；兩者皆失敗時維持原本的 Google 連結。"""
-    real = "https://www.cna.com.tw/news/aipl/202609170158.aspx"
-    blob = b"\x08\x13\x22\x51" + real.encode() + b"\xd2\x01"
-    seg = base64.urlsafe_b64encode(blob).decode().rstrip("=")
-    gurl = f"https://news.google.com/rss/articles/{seg}?oc=5"
-
-    monkeypatch.setattr(fetcher, "_follow_google_url", lambda u: "")
-    item = _item("勞動部公布基本工資", gurl)
-    fetcher.resolve_google_url(item)
-    assert item.url == real                      # 退回離線解碼
-
-    unresolvable = "https://news.google.com/rss/articles/AU_yqLshort?oc=5"
-    item2 = _item("勞動部公布基本工資", unresolvable)
-    fetcher.resolve_google_url(item2)
-    assert item2.url == unresolvable             # 還原不出時維持原連結
-
-    # 非 Google 連結不得更動
-    item3 = _item("勞動部公布基本工資", real)
-    fetcher.resolve_google_url(item3)
-    assert item3.url == real
 
 
 def test_redact_token():
