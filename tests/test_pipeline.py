@@ -170,6 +170,54 @@ def test_is_excluded():
     assert not fetcher.is_excluded("Taiwan News Express", "https://example.com.tw/a", ex)
 
 
+def test_source_tier():
+    """官方 RSS > 其他原始媒體 > 聚合轉載平台。"""
+    assert fetcher.source_tier("中央社") == 0
+    assert fetcher.source_tier("自由時報") == 0
+    assert fetcher.source_tier("TVBS新聞網") == 1
+    assert fetcher.source_tier("民視新聞網") == 1
+    assert fetcher.source_tier("LINE TODAY") == 2
+    assert fetcher.source_tier("Yahoo新聞") == 2
+    assert fetcher.source_tier("CMoney") == 2
+    assert fetcher.source_tier("") == 1
+
+
+def test_split_outlet():
+    """聚合平台把原始媒體名接在標題尾端，應取回當作真正的來源。"""
+    # 2026-09-17 實際案例
+    assert fetcher.split_outlet(
+        "洪申翰出訪「恐被當中國人」？本人嚴正駁斥 | 民視新聞網", "LINE TODAY"
+    ) == ("洪申翰出訪「恐被當中國人」？本人嚴正駁斥", "民視新聞網")
+    assert fetcher.split_outlet(
+        "洪申翰為國際技能競賽53國手授旗 | Newtalk", "LINE TODAY"
+    ) == ("洪申翰為國際技能競賽53國手授旗", "Newtalk")
+
+    # 「產業」是分類名不是媒體名，標題要清掉但來源不可改
+    title, source = fetcher.split_outlet(
+        "婚假要變14天了！勞動部預告10/1上路| 產業", "LINE TODAY")
+    assert title == "婚假要變14天了！勞動部預告10/1上路"
+    assert source == "LINE TODAY"
+
+    # 來源本來就是原始媒體時不更動來源
+    assert fetcher.split_outlet("勞動部公布基本工資 | 財經", "中央社")[1] == "中央社"
+    # 沒有尾綴時原樣回傳
+    assert fetcher.split_outlet("勞動部公布基本工資", "中央社") == ("勞動部公布基本工資", "中央社")
+    # 整個標題都是尾綴時不可清成空字串
+    assert fetcher.split_outlet("| 民視新聞網", "LINE TODAY") == ("| 民視新聞網", "LINE TODAY")
+
+
+def test_dedupe_prefers_original_outlet_over_aggregator():
+    """同一事件同時有原始媒體與聚合平台版本時，留原始媒體那一則。"""
+    items = [
+        _item("勞動部宣布婚假8天變14天 10月1日上路", "https://x/1", "LINE TODAY",
+              summary="摘要內容" * 10),
+        _item("勞動部宣布婚假8天變14天 10月1日上路", "https://x/2", "中央社",
+              summary="摘要內容" * 10),
+    ]
+    out = dedupe_batch(items)
+    assert len(out) == 1 and out[0].source == "中央社"
+
+
 def test_redact_token():
     """日誌不得洩漏 Bot Token（公開 repo 的 Actions 紀錄任何人都看得到）。"""
     token = "123456789:AAFakeTokenForTestOnly"  # noqa: S105 假 token，僅供測試

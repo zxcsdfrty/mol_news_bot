@@ -66,8 +66,10 @@ def similar(a: str, b: str, threshold: float = SIMILARITY) -> bool:
 
 
 def _quality(i: NewsItem) -> tuple:
-    """同一新聞留哪一則：非 Google 轉址 > 有摘要 > 分數高。"""
-    return ("news.google.com" not in i.url, len(i.summary) > 20, i.score)
+    """同一新聞留哪一則：非 Google 轉址 > 原始媒體（非聚合平台）> 有摘要 > 分數高。"""
+    from .fetcher import source_tier  # 延後匯入，避免模組載入順序相依
+    return ("news.google.com" not in i.url, -source_tier(i.source),
+            len(i.summary) > 20, i.score)
 
 
 def dedupe_batch(items: list[NewsItem]) -> list[NewsItem]:

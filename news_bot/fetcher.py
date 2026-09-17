@@ -59,6 +59,52 @@ def is_excluded(source: str, url: str, excludes: list[str] | None = None) -> boo
     return False
 
 
+def _yaml_list(key: str) -> list[str]:
+    return [str(s) for s in (load_yaml("sources.yaml").get(key) or [])]
+
+
+def _rss_names() -> set[str]:
+    return {s["name"] for s in (load_yaml("sources.yaml").get("rss") or []) if s.get("name")}
+
+
+def source_tier(source: str) -> int:
+    """0＝設定檔中的官方 RSS 媒體、1＝其他原始媒體、2＝聚合轉載平台。
+
+    同一事件常被聚合平台重複轉載，數量遠多於原始媒體，若不分級會把
+    中央社、自由時報等原始報導整個擠掉（2026-09-17 實際推播的 30 則
+    無一來自官方 RSS）。分級只影響「留哪一則」與排序，不會排除任何新聞。
+    """
+    name = (source or "").lower()
+    if source in _rss_names():
+        return 0
+    if any(a.lower() in name for a in _yaml_list("aggregators")):
+        return 2
+    return 1
+
+
+# 聚合平台常把原始媒體名接在標題尾端，例如「…嚴正駁斥 | 民視新聞網」。
+_TAIL_RE = re.compile(r"\s*[|｜]\s*([^|｜]{1,12})\s*$")
+# 判定尾端字串是否為媒體名（而非「產業」「生活」這類分類名）
+_MEDIA_RE = re.compile(r"(報|網|社|視|台|刊|聞|傳媒|電視)$|^[A-Za-z][A-Za-z0-9.\- ]{2,19}$")
+
+
+def split_outlet(title: str, source: str) -> tuple[str, str]:
+    """把標題尾端的媒體名拆出來，回傳 (清理後標題, 來源)。
+
+    尾端字串看起來像媒體名，且目前來源是聚合平台時才改用它；否則只清標題。
+    """
+    m = _TAIL_RE.search(title)
+    if not m:
+        return title, source
+    tail = m.group(1).strip()
+    cleaned = title[: m.start()].strip()
+    if not cleaned:
+        return title, source
+    if _MEDIA_RE.search(tail) and source_tier(source) == 2:
+        return cleaned, tail
+    return cleaned, source
+
+
 def clean_text(s: str | None) -> str:
     if not s:
         return ""
@@ -124,6 +170,8 @@ def _fetch_google(query: str, when: str) -> list[NewsItem]:
             title = title[: -len(source) - 3].strip()
         elif " - " in title:
             title, source = title.rsplit(" - ", 1)
+        # 聚合平台會把原始媒體名接在標題尾端，取回來當作真正的來源
+        title, source = split_outlet(title, source)
         # Google 的 description 只是標題+媒體的 HTML，不當摘要使用
         items.append(NewsItem(title=title, url=e.get("link", ""),
                               source=source or "Google新聞",

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from .classifier import Classifier
 from .config import settings
 from .dedup import dedupe_batch, similar
-from .fetcher import enrich_summary, fetch_all
+from .fetcher import enrich_summary, fetch_all, source_tier
 from .notifier import push
 from .storage import get_store
 
@@ -75,8 +75,11 @@ def run(dry_run: bool = False, no_push: bool = False, store=None) -> dict:
             else:
                 to_send.append(row)
 
-        # 高分在前；單次上限避免洗版，超出的留待下一輪
-        to_send.sort(key=lambda r: (-r.get("score", 0), r["published_at"]))
+        # 高分在前，同分時原始媒體優先於聚合轉載平台；
+        # 單次上限避免洗版，超出的留待下一輪
+        to_send.sort(key=lambda r: (-r.get("score", 0),
+                                    source_tier(r.get("source", "")),
+                                    r["published_at"]))
         batch = to_send[: settings.max_items_per_push]
         sent_ids = push(batch, dry_run=dry_run)
         if not dry_run:
