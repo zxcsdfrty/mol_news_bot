@@ -17,22 +17,36 @@ import feedparser
 import requests
 
 from .config import load_yaml, settings
-from .fetcher import GOOGLE_NEWS, UA
+from .fetcher import GOOGLE_NEWS, UA, clean_text
+
+
+def usable_entries(entries) -> int:
+    """實際抓得進來的則數：_fetch_rss 會丟掉缺標題或缺連結的項目。"""
+    return sum(1 for e in entries
+               if clean_text(e.get("title")) and (e.get("link") or "").strip())
 
 
 def _check(name: str, url: str) -> dict:
-    r = {"name": name, "url": url, "status": "", "entries": 0, "latest": "", "ok": False}
+    r = {"name": name, "url": url, "status": "", "entries": 0, "usable": 0,
+         "latest": "", "note": "", "ok": False}
     try:
         resp = requests.get(url, headers={"User-Agent": UA}, timeout=settings.http_timeout)
         r["status"] = str(resp.status_code)
         if resp.ok:
             feed = feedparser.parse(resp.content)
             r["entries"] = len(feed.entries)
+            # 以「實際可用」而非「解析得到」判定，否則像聯合新聞網那樣回 20 則
+            # 卻每則都沒有標題的情況會被誤報為正常。
+            r["usable"] = usable_entries(feed.entries)
             if feed.entries:
-                r["latest"] = (feed.entries[0].get("title") or "")[:30]
-            r["ok"] = r["entries"] > 0
+                r["latest"] = clean_text(feed.entries[0].get("title"))[:30]
+            if getattr(feed, "bozo", 0) and getattr(feed, "bozo_exception", None):
+                r["note"] = type(feed.bozo_exception).__name__
+            elif r["entries"] and not r["usable"]:
+                r["note"] = "項目缺標題或連結"
+            r["ok"] = r["usable"] > 0
             if not r["ok"]:
-                r["status"] += " 無項目"
+                r["status"] += " 無可用項目"
     except Exception as e:  # noqa: BLE001
         r["status"] = type(e).__name__
     return r
@@ -52,10 +66,12 @@ def main() -> int:
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda t: _check(*t), targets))
 
-    lines = ["| 結果 | 來源 | HTTP | 則數 | 最新標題 | URL |", "|---|---|---|---|---|---|"]
+    lines = ["| 結果 | 來源 | HTTP | 解析 | 可用 | 備註 | 最新標題 | URL |",
+             "|---|---|---|---|---|---|---|---|"]
     for r in results:
         lines.append(f"| {'✅' if r['ok'] else '❌'} | {r['name']} | {r['status']} | "
-                     f"{r['entries']} | {r['latest'].replace('|', '/')} | {r['url']} |")
+                     f"{r['entries']} | {r['usable']} | {r['note']} | "
+                     f"{r['latest'].replace('|', '/')} | {r['url']} |")
     bad = [r for r in results if not r["ok"]]
     lines.append(f"\n共 {len(results)} 個來源，失效 {len(bad)} 個")
     report = "\n".join(lines)
