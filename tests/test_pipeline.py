@@ -94,6 +94,20 @@ def test_message_format(monkeypatch):
     assert "🔴" not in msgs[0][0] and "勞工保險" not in msgs[0][0]
 
 
+def test_redact_token():
+    """日誌不得洩漏 Bot Token（公開 repo 的 Actions 紀錄任何人都看得到）。"""
+    token = "123456789:AAFakeTokenForTestOnly"  # noqa: S105 假 token，僅供測試
+    object.__setattr__(notifier.settings, "telegram_bot_token", token)
+    try:
+        msg = f"HTTPSConnectionPool: Max retries exceeded with url: /bot{token}/sendMessage"
+        assert token not in notifier._redact(msg)
+        assert "***" in notifier._redact(msg)
+    finally:
+        object.__setattr__(notifier.settings, "telegram_bot_token", "")
+    # token 為空字串時不可把每個字元都換掉
+    assert notifier._redact("連線逾時") == "連線逾時"
+
+
 def test_message_format_optional_fields():
     """缺少來源或摘要時，不應留下多餘的括號或空行。"""
     rows = [{"id": 1, "title": "勞動部公布基本工資", "summary": "", "url": "https://x/1",

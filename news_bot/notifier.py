@@ -61,6 +61,16 @@ def build_messages(rows: list[dict]) -> list[tuple[str, list]]:
     return msgs
 
 
+def _redact(text: str) -> str:
+    """遮蔽日誌中的 Bot Token。
+
+    requests 的例外訊息會帶出完整請求網址，其中含有 Token；而公開 repo 的
+    Actions 執行紀錄任何人都看得到，故寫入日誌前一律先遮蔽。
+    """
+    token = settings.telegram_bot_token
+    return text.replace(token, "***") if token else text
+
+
 def send(text: str, retries: int = 3) -> bool:
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
     payload = {
@@ -79,9 +89,9 @@ def send(text: str, retries: int = 3) -> bool:
                 continue
             if r.ok:
                 return True
-            log.error("Telegram 發送失敗 %s: %s", r.status_code, r.text[:300])
+            log.error("Telegram 發送失敗 %s: %s", r.status_code, _redact(r.text[:300]))
         except requests.RequestException as ex:
-            log.error("Telegram 連線錯誤: %s", ex)
+            log.error("Telegram 連線錯誤: %s", _redact(str(ex)))
         time.sleep(2 * (attempt + 1))
     return False
 
