@@ -1,4 +1,3 @@
-import base64
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -96,6 +95,67 @@ def test_message_format(monkeypatch):
     assert "🔴" not in msgs[0][0] and "勞工保險" not in msgs[0][0]
 
 
+# 2026-09-17 實際抓到的同一事件標題，各家改寫幅度極大。
+# 修正前 14 則全部各推一封，等於同一件事洗版 14 次。
+_婚假新聞 = [
+    "婚假再加碼！勞動部擬「8天延至14天」 新制上路時間曝",
+    "婚假大紅包來了！勞動部將預告婚假8天增至14天",
+    "拯救低迷生育率！勞動部擬婚假8天延為14天 網議論：解決高房價才是關鍵",
+    "婚假8→14天「6天薪水政府補」 勞動部預告將修法",
+    "婚假8天增至14天！勞動部今將公布新制上路時間",
+    "婚假要變14天了！勞動部預告10/1上路 「這6天」薪資政府補助",
+    "勞動部宣布「婚假8天變14天」10月上路 已登記者還有機會！條件一次看",
+    "婚假8天變14天 勞動部宣布10月1日上路",
+    "勞動部修法新制10/1上路！婚假升級14天「已婚也能補假」不扣薪",
+    "勞動部預告婚假由8天增至14天 10月上路",
+    "結婚大禮包！ 勞動部：婚嫁延長至14天擬10/1上路",
+    "婚假8天加碼為14天！勞動部：10/1上路、6天薪資負擔由政府支應",
+]
+
+# 彼此無關的事件，不得被併在一起
+_不同事件 = [
+    "一早「媽媽領補助」！入帳4.2萬 勞動部月底前再發15筆",
+    "雲林母親載雙胞胎上學釀1死2重傷 逃逸移工撞出一堆問題引議會關切",
+    "外送專法逼漲價2／勞動部直言現無修法理由 外送平台現有經驗恐打掉重練！",
+    "勞保年金65歲才領吃虧了！專家試算「男女最佳請領年齡」",
+    "洪申翰為國際技能競賽53國手授旗：賽場外的事情交給我們",
+    "基本工資上看3萬？卓榮泰曝關鍵：由最低工資審議會決定",
+    "最多領500萬！企托補助申請倒數2週 勞動部籲雇主把握機會",
+]
+
+
+def test_dedupe_same_event_real_titles():
+    """同一事件的多家改寫應大幅收斂，且不得併掉無關事件。"""
+    items = [_item(t, f"https://x/{n}", summary="摘要內容" * 10)
+             for n, t in enumerate(_婚假新聞 + _不同事件)]
+    kept = dedupe_batch(items)
+    titles = [i.title for i in kept]
+
+    婚假剩 = sum(1 for t in titles if t in _婚假新聞)
+    assert 婚假剩 <= 4, f"同一事件仍推播 {婚假剩} 則：{titles}"
+    # 無關事件一則都不能少
+    for t in _不同事件:
+        assert t in titles, f"不同事件被誤併：{t}"
+
+
+def test_dedupe_chains_through_middle_title():
+    """A 與 C 不相似，但兩者都像 B 時，三則應收斂為同一群。"""
+    a = "婚假再加碼！勞動部擬「8天延至14天」 新制上路時間曝"
+    b = "婚假8天增至14天！勞動部今將公布新制上路時間"
+    c = "婚假大紅包來了！勞動部將預告婚假8天增至14天"
+    assert not similar(title_key(a), title_key(c))   # 直接比對不相似
+    items = [_item(t, f"https://x/{n}", summary="摘要" * 20)
+             for n, t in enumerate((a, b, c))]
+    assert len(dedupe_batch(items)) == 1
+
+
+def test_dedupe_keeps_short_titles_apart():
+    """去掉機關名後過短者不得僅因零星字元相符就被併掉。"""
+    items = [_item(t, f"https://x/{n}") for n, t in enumerate(
+        ("勞動部說明", "勞動部回應", "勞動部澄清"))]
+    assert len(dedupe_batch(items)) == 3
+
+
 def test_is_excluded():
     """排除社群來源，但網域比對不可誤傷正常媒體。"""
     ex = ["facebook.com", "youtube.com", "x.com", "ptt.cc"]
@@ -110,39 +170,52 @@ def test_is_excluded():
     assert not fetcher.is_excluded("Taiwan News Express", "https://example.com.tw/a", ex)
 
 
-def test_decode_google_url():
-    """舊式轉址可從 base64 內容解出原文網址，雜訊或新式轉址則回傳空字串。"""
-    blob = b"\x08\x13\x22\x51" + b"https://www.cna.com.tw/news/aipl/202609170158.aspx" + b"\xd2\x01\x05"
-    seg = base64.urlsafe_b64encode(blob).decode().rstrip("=")
-    link = f"https://news.google.com/rss/articles/{seg}?oc=5"
-    assert fetcher._decode_google_url(link) == "https://www.cna.com.tw/news/aipl/202609170158.aspx"
-    # 解不出網址時不可回傳半截結果
-    noise = base64.urlsafe_b64encode(b"\x01\x02\x03no-url-here\xff").decode().rstrip("=")
-    assert fetcher._decode_google_url(f"https://news.google.com/rss/articles/{noise}") == ""
-    assert fetcher._decode_google_url("https://www.cna.com.tw/news/1") == ""
+def test_source_tier():
+    """官方 RSS > 其他原始媒體 > 聚合轉載平台。"""
+    assert fetcher.source_tier("中央社") == 0
+    assert fetcher.source_tier("自由時報") == 0
+    assert fetcher.source_tier("TVBS新聞網") == 1
+    assert fetcher.source_tier("民視新聞網") == 1
+    assert fetcher.source_tier("LINE TODAY") == 2
+    assert fetcher.source_tier("Yahoo新聞") == 2
+    assert fetcher.source_tier("CMoney") == 2
+    assert fetcher.source_tier("") == 1
 
 
-def test_resolve_google_url_fallbacks(monkeypatch):
-    """連線失敗時退回離線解碼；兩者皆失敗時維持原本的 Google 連結。"""
-    real = "https://www.cna.com.tw/news/aipl/202609170158.aspx"
-    blob = b"\x08\x13\x22\x51" + real.encode() + b"\xd2\x01"
-    seg = base64.urlsafe_b64encode(blob).decode().rstrip("=")
-    gurl = f"https://news.google.com/rss/articles/{seg}?oc=5"
+def test_split_outlet():
+    """聚合平台把原始媒體名接在標題尾端，應取回當作真正的來源。"""
+    # 2026-09-17 實際案例
+    assert fetcher.split_outlet(
+        "洪申翰出訪「恐被當中國人」？本人嚴正駁斥 | 民視新聞網", "LINE TODAY"
+    ) == ("洪申翰出訪「恐被當中國人」？本人嚴正駁斥", "民視新聞網")
+    assert fetcher.split_outlet(
+        "洪申翰為國際技能競賽53國手授旗 | Newtalk", "LINE TODAY"
+    ) == ("洪申翰為國際技能競賽53國手授旗", "Newtalk")
 
-    monkeypatch.setattr(fetcher, "_follow_google_url", lambda u: "")
-    item = _item("勞動部公布基本工資", gurl)
-    fetcher.resolve_google_url(item)
-    assert item.url == real                      # 退回離線解碼
+    # 「產業」是分類名不是媒體名，標題要清掉但來源不可改
+    title, source = fetcher.split_outlet(
+        "婚假要變14天了！勞動部預告10/1上路| 產業", "LINE TODAY")
+    assert title == "婚假要變14天了！勞動部預告10/1上路"
+    assert source == "LINE TODAY"
 
-    unresolvable = "https://news.google.com/rss/articles/AU_yqLshort?oc=5"
-    item2 = _item("勞動部公布基本工資", unresolvable)
-    fetcher.resolve_google_url(item2)
-    assert item2.url == unresolvable             # 還原不出時維持原連結
+    # 來源本來就是原始媒體時不更動來源
+    assert fetcher.split_outlet("勞動部公布基本工資 | 財經", "中央社")[1] == "中央社"
+    # 沒有尾綴時原樣回傳
+    assert fetcher.split_outlet("勞動部公布基本工資", "中央社") == ("勞動部公布基本工資", "中央社")
+    # 整個標題都是尾綴時不可清成空字串
+    assert fetcher.split_outlet("| 民視新聞網", "LINE TODAY") == ("| 民視新聞網", "LINE TODAY")
 
-    # 非 Google 連結不得更動
-    item3 = _item("勞動部公布基本工資", real)
-    fetcher.resolve_google_url(item3)
-    assert item3.url == real
+
+def test_dedupe_prefers_original_outlet_over_aggregator():
+    """同一事件同時有原始媒體與聚合平台版本時，留原始媒體那一則。"""
+    items = [
+        _item("勞動部宣布婚假8天變14天 10月1日上路", "https://x/1", "LINE TODAY",
+              summary="摘要內容" * 10),
+        _item("勞動部宣布婚假8天變14天 10月1日上路", "https://x/2", "中央社",
+              summary="摘要內容" * 10),
+    ]
+    out = dedupe_batch(items)
+    assert len(out) == 1 and out[0].source == "中央社"
 
 
 def test_redact_token():

@@ -1,8 +1,6 @@
 """從各媒體 RSS 與 Google 新聞 RSS 抓取新聞。"""
 from __future__ import annotations
 
-import base64
-import binascii
 import html
 import logging
 import re
@@ -59,6 +57,52 @@ def is_excluded(source: str, url: str, excludes: list[str] | None = None) -> boo
         if x in name or (len(brand) >= 4 and brand in name):
             return True
     return False
+
+
+def _yaml_list(key: str) -> list[str]:
+    return [str(s) for s in (load_yaml("sources.yaml").get(key) or [])]
+
+
+def _rss_names() -> set[str]:
+    return {s["name"] for s in (load_yaml("sources.yaml").get("rss") or []) if s.get("name")}
+
+
+def source_tier(source: str) -> int:
+    """0＝設定檔中的官方 RSS 媒體、1＝其他原始媒體、2＝聚合轉載平台。
+
+    同一事件常被聚合平台重複轉載，數量遠多於原始媒體，若不分級會把
+    中央社、自由時報等原始報導整個擠掉（2026-09-17 實際推播的 30 則
+    無一來自官方 RSS）。分級只影響「留哪一則」與排序，不會排除任何新聞。
+    """
+    name = (source or "").lower()
+    if source in _rss_names():
+        return 0
+    if any(a.lower() in name for a in _yaml_list("aggregators")):
+        return 2
+    return 1
+
+
+# 聚合平台常把原始媒體名接在標題尾端，例如「…嚴正駁斥 | 民視新聞網」。
+_TAIL_RE = re.compile(r"\s*[|｜]\s*([^|｜]{1,12})\s*$")
+# 判定尾端字串是否為媒體名（而非「產業」「生活」這類分類名）
+_MEDIA_RE = re.compile(r"(報|網|社|視|台|刊|聞|傳媒|電視)$|^[A-Za-z][A-Za-z0-9.\- ]{2,19}$")
+
+
+def split_outlet(title: str, source: str) -> tuple[str, str]:
+    """把標題尾端的媒體名拆出來，回傳 (清理後標題, 來源)。
+
+    尾端字串看起來像媒體名，且目前來源是聚合平台時才改用它；否則只清標題。
+    """
+    m = _TAIL_RE.search(title)
+    if not m:
+        return title, source
+    tail = m.group(1).strip()
+    cleaned = title[: m.start()].strip()
+    if not cleaned:
+        return title, source
+    if _MEDIA_RE.search(tail) and source_tier(source) == 2:
+        return cleaned, tail
+    return cleaned, source
 
 
 def clean_text(s: str | None) -> str:
@@ -126,97 +170,14 @@ def _fetch_google(query: str, when: str) -> list[NewsItem]:
             title = title[: -len(source) - 3].strip()
         elif " - " in title:
             title, source = title.rsplit(" - ", 1)
+        # 聚合平台會把原始媒體名接在標題尾端，取回來當作真正的來源
+        title, source = split_outlet(title, source)
         # Google 的 description 只是標題+媒體的 HTML，不當摘要使用
         items.append(NewsItem(title=title, url=e.get("link", ""),
                               source=source or "Google新聞",
                               published_at=_parse_time(e), summary=""))
     log.info("Google新聞 [%s] %d 則", query, len(items))
     return items
-
-
-# 允許出現在網址中的字元；遇到其他位元組即停止，避免把 protobuf 的二進位雜訊一併擷取
-_URL_IN_BLOB = re.compile(rb"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]{12,}")
-_AU_RE = re.compile(r'data-n-au=["\']([^"\']+)["\']', re.I)
-_CANONICAL_RE = re.compile(
-    r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', re.I)
-_REFRESH_RE = re.compile(r'url=(https?://[^"\'>\s]+)', re.I)
-
-
-def _sane_url(url: str) -> bool:
-    parts = urlsplit(url)
-    return (parts.scheme in ("http", "https") and "." in parts.netloc
-            and GOOGLE_HOST not in parts.netloc and len(url) < 500)
-
-
-def _follow_google_url(link: str) -> str:
-    """實際連線跟隨轉址取得原文網址；失敗時回傳空字串。"""
-    try:
-        r = requests.get(link, headers={"User-Agent": UA},
-                         timeout=settings.http_timeout, allow_redirects=True)
-    except requests.RequestException as e:  # 單則還原失敗不影響其他新聞
-        log.warning("Google 轉址還原失敗: %s", e)
-        return ""
-    if _sane_url(r.url):
-        return r.url
-    # 轉址頁改以 JavaScript 導向時，從 HTML 內找原文網址
-    text = r.content[:100_000].decode("utf-8", errors="ignore")
-    for pat in (_AU_RE, _CANONICAL_RE, _REFRESH_RE):
-        m = pat.search(text)
-        if m:
-            cand = html.unescape(m.group(1))
-            if _sane_url(cand):
-                return cand
-    return ""
-
-
-def _decode_google_url(link: str) -> str:
-    """離線解出轉址網址中夾帶的原文網址；解不出時回傳空字串。
-
-    舊式 CBMi... 轉址的 base64 內容含有原文網址，新式的則沒有，
-    因此僅作為 _follow_google_url() 連線失敗時的備援。
-    """
-    m = re.search(r"/articles/([A-Za-z0-9_-]{16,})", link)
-    if not m:
-        return ""
-    seg = m.group(1)
-    try:
-        raw = base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))
-    except (ValueError, binascii.Error):
-        return ""
-    for cand in _URL_IN_BLOB.findall(raw):
-        url = cand.decode("ascii", "ignore")
-        if _sane_url(url):
-            return url
-    return ""
-
-
-def resolve_google_url(item: NewsItem) -> None:
-    """把 Google 新聞的轉址連結換成原文網址。
-
-    廠商格式會把網址直接顯示在訊息中，轉址網址長達數百字元且預覽卡片
-    會指向 Google 而非原媒體。還原後亦可正常補抓摘要（enrich_summary
-    原本會略過 Google 連結）。兩種方式都還原不出時維持原連結。
-    """
-    if not is_google_url(item.url):
-        return
-    for candidate in (_follow_google_url(item.url), _decode_google_url(item.url)):
-        if candidate:
-            item.url = candidate
-            return
-    log.info("無法還原原文網址，維持 Google 連結：%s", item.title[:40])
-
-
-def resolve_all(items: list[NewsItem]) -> list[NewsItem]:
-    """還原 Google 轉址連結，並濾掉還原後才看得出來的非新聞來源。"""
-    google = [i for i in items if is_google_url(i.url)]
-    if google:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            list(pool.map(resolve_google_url, google))
-    excludes = excluded_sources()
-    kept = [i for i in items if not is_excluded(i.source, i.url, excludes)]
-    if len(kept) != len(items):
-        log.info("排除非新聞來源 %d 則", len(items) - len(kept))
-    return kept
 
 
 def fetch_all() -> list[NewsItem]:
