@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from .classifier import Classifier
 from .config import settings
 from .dedup import dedupe_batch, similar
-from .fetcher import enrich_summary, fetch_all
+from .fetcher import enrich_summary, fetch_all, resolve_all
 from .notifier import push
 from .storage import get_store
 
@@ -41,6 +41,8 @@ def run(dry_run: bool = False, no_push: bool = False, store=None) -> dict:
 
     items = fetch_all()
     relevant = [i for i in items if clf.apply(i)]
+    # 先還原 Google 轉址再去重：原文網址一致時，他台重複收錄可直接以 URL 去重
+    relevant = resolve_all(relevant)
     unique = dedupe_batch(relevant)
 
     # 摘要過短者嘗試補抓原文描述，補完後重新計分（分數只會更高）

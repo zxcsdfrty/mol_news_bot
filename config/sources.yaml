@@ -61,3 +61,18 @@ google_news:
     - 職災
     - 勞資爭議
     - 育嬰留職停薪
+
+# 非新聞媒體來源：Google 新聞偶爾會收錄社群貼文、影音頻道與論壇文章，
+# 這類不屬於媒體報導，一律不收錄也不推播。
+# 比對方式：網址網域與下列項目相同或為其子網域即排除（m.facebook.com 會被
+# facebook.com 涵蓋），來源名稱則採包含比對。皆不分大小寫。
+exclude_sources:
+  - facebook.com
+  - youtube.com
+  - youtu.be
+  - instagram.com
+  - threads.net
+  - twitter.com
+  - x.com
+  - tiktok.com
+  - ptt.cc
