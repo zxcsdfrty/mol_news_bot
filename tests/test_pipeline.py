@@ -1,7 +1,9 @@
+import base64
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from news_bot import fetcher
 from news_bot import main as main_mod
 from news_bot import notifier
 from news_bot.classifier import Classifier
@@ -71,17 +73,99 @@ def test_dedupe_prefers_publisher_url():
     assert len(out) == 1 and "cna" in out[0].url
 
 
-def test_message_split(monkeypatch):
-    rows = [{"id": i, "title": f"勞動部新聞標題 {i} <測試&跳脫>", "summary": "摘" * 200,
+def test_message_format(monkeypatch):
+    """廠商格式：一則新聞一封訊息，標題後標來源，裸網址供 Telegram 產生預覽卡片。"""
+    rows = [{"id": i, "title": f"勞動部新聞標題 {i} <測試&跳脫>", "summary": "摘" * 400,
              "url": f"https://x/{i}?a=1&b=2", "source": "中央社",
              "published_at": datetime.now(TW).isoformat(), "topics": ["勞工保險"],
              "sentiment": "負面"} for i in range(40)]
     msgs = notifier.build_messages(rows)
-    assert len(msgs) > 1
-    assert all(len(m) <= 4096 for m, _ in msgs)
+    assert len(msgs) == 40                                  # 不再合併成多則新聞一封
+    assert all(len(ids) == 1 for _, ids in msgs)
     assert sorted(i for _, ids in msgs for i in ids) == list(range(40))
-    assert "&lt;測試&amp;跳脫&gt;" in msgs[0][0]
-    assert "a=1&amp;b=2" in msgs[0][0]
+    assert all(len(m) <= 4096 for m, _ in msgs)
+
+    lines = msgs[0][0].split("\n")
+    assert lines[0] == "【新聞通報】"
+    assert lines[1].endswith(" (中央社)</b>")                # 標題後方標示來源
+    assert lines[2] == "https://x/0?a=1&amp;b=2"            # 裸網址，不做成超連結
+    assert lines[3].startswith("　")                         # 摘要以全形空格縮排
+    assert "&lt;測試&amp;跳脫&gt;" in lines[1]               # HTML 跳脫
+    assert "摘" * 300 in lines[3] and "摘" * 301 not in lines[3]  # 摘要截斷於上限
+    # 議題與輿情傾向只進資料庫，不進推播訊息
+    assert "🔴" not in msgs[0][0] and "勞工保險" not in msgs[0][0]
+
+
+def test_is_excluded():
+    """排除社群來源，但網域比對不可誤傷正常媒體。"""
+    ex = ["facebook.com", "youtube.com", "x.com", "ptt.cc"]
+    assert fetcher.is_excluded("facebook.com", "https://m.facebook.com/p/1", ex)
+    assert fetcher.is_excluded("Facebook", "https://news.google.com/rss/articles/A", ex)
+    assert fetcher.is_excluded("", "https://www.youtube.com/watch?v=1", ex)
+    # x.com 不可誤傷 xxx.com.tw、chinatimes.com 等正常網域
+    assert not fetcher.is_excluded("中時新聞網", "https://www.chinatimes.com/a", ex)
+    assert not fetcher.is_excluded("某報", "https://www.xxx.com.tw/a", ex)
+    assert not fetcher.is_excluded("中央社", "https://www.cna.com.tw/news/1", ex)
+    # 品牌名過短者（x.com 的 x）不得用於名稱比對，否則會命中任意媒體名
+    assert not fetcher.is_excluded("Taiwan News Express", "https://example.com.tw/a", ex)
+
+
+def test_decode_google_url():
+    """舊式轉址可從 base64 內容解出原文網址，雜訊或新式轉址則回傳空字串。"""
+    blob = b"\x08\x13\x22\x51" + b"https://www.cna.com.tw/news/aipl/202609170158.aspx" + b"\xd2\x01\x05"
+    seg = base64.urlsafe_b64encode(blob).decode().rstrip("=")
+    link = f"https://news.google.com/rss/articles/{seg}?oc=5"
+    assert fetcher._decode_google_url(link) == "https://www.cna.com.tw/news/aipl/202609170158.aspx"
+    # 解不出網址時不可回傳半截結果
+    noise = base64.urlsafe_b64encode(b"\x01\x02\x03no-url-here\xff").decode().rstrip("=")
+    assert fetcher._decode_google_url(f"https://news.google.com/rss/articles/{noise}") == ""
+    assert fetcher._decode_google_url("https://www.cna.com.tw/news/1") == ""
+
+
+def test_resolve_google_url_fallbacks(monkeypatch):
+    """連線失敗時退回離線解碼；兩者皆失敗時維持原本的 Google 連結。"""
+    real = "https://www.cna.com.tw/news/aipl/202609170158.aspx"
+    blob = b"\x08\x13\x22\x51" + real.encode() + b"\xd2\x01"
+    seg = base64.urlsafe_b64encode(blob).decode().rstrip("=")
+    gurl = f"https://news.google.com/rss/articles/{seg}?oc=5"
+
+    monkeypatch.setattr(fetcher, "_follow_google_url", lambda u: "")
+    item = _item("勞動部公布基本工資", gurl)
+    fetcher.resolve_google_url(item)
+    assert item.url == real                      # 退回離線解碼
+
+    unresolvable = "https://news.google.com/rss/articles/AU_yqLshort?oc=5"
+    item2 = _item("勞動部公布基本工資", unresolvable)
+    fetcher.resolve_google_url(item2)
+    assert item2.url == unresolvable             # 還原不出時維持原連結
+
+    # 非 Google 連結不得更動
+    item3 = _item("勞動部公布基本工資", real)
+    fetcher.resolve_google_url(item3)
+    assert item3.url == real
+
+
+def test_redact_token():
+    """日誌不得洩漏 Bot Token（公開 repo 的 Actions 紀錄任何人都看得到）。"""
+    token = "123456789:AAFakeTokenForTestOnly"  # noqa: S105 假 token，僅供測試
+    object.__setattr__(notifier.settings, "telegram_bot_token", token)
+    try:
+        msg = f"HTTPSConnectionPool: Max retries exceeded with url: /bot{token}/sendMessage"
+        assert token not in notifier._redact(msg)
+        assert "***" in notifier._redact(msg)
+    finally:
+        object.__setattr__(notifier.settings, "telegram_bot_token", "")
+    # token 為空字串時不可把每個字元都換掉
+    assert notifier._redact("連線逾時") == "連線逾時"
+
+
+def test_message_format_optional_fields():
+    """缺少來源或摘要時，不應留下多餘的括號或空行。"""
+    rows = [{"id": 1, "title": "勞動部公布基本工資", "summary": "", "url": "https://x/1",
+             "source": ""}]
+    text, ids = notifier.build_messages(rows)[0]
+    assert text == "【新聞通報】\n<b>勞動部公布基本工資</b>\nhttps://x/1"
+    assert ids == [1]
 
 
 def test_quiet_hours():
