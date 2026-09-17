@@ -1,0 +1,29 @@
+name: 測試
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+  workflow_call: {}          # 供部署流程先呼叫，測試通過才部署
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pytest
+      - name: 單元與端到端測試
+        run: python -m pytest -v
+      - name: 檢查設定檔格式
+        run: |
+          python -c "import yaml; [yaml.safe_load(open(f, encoding='utf-8')) for f in ('config/sources.yaml','config/keywords.yaml')]; print('YAML OK')"
+      - name: 關鍵字判斷抽樣
+        run: |
+          python -m news_bot.check "勞動部宣布明年基本工資調漲"
+          python -m news_bot.check "美國勞動部公布非農就業數據"

@@ -1,0 +1,51 @@
+name: 勞動部新聞推播
+
+on:
+  schedule:
+    # GitHub 內建排程（UTC）：尖峰時段可能延遲 5~15 分鐘，且公開 repo 60 天無 commit 會被自動停用。
+    # 建議主要改由外部排程（cron-job.org）每 30 分鐘呼叫 workflow_dispatch API，此處作為備援。
+    # 兩者都觸發也沒關係：程式會檢查距上次推播未滿 25 分鐘則只收錄不推播（MIN_PUSH_INTERVAL_MIN）。
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 執行模式
+        type: choice
+        default: normal
+        options:
+          - normal     # 正式：收錄 + 推播
+          - no-push    # 只收錄不推播
+          - dry-run    # 推播內容只印在 Actions 紀錄，不發 Telegram
+          - check-sources  # 只檢查各 RSS 來源是否可用（結果見 Job Summary）
+
+concurrency:
+  group: news-bot              # 避免前一輪未結束又啟動，造成重複推播
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 抓取、分析、推播
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          WEB_URL: ${{ vars.WEB_URL }}
+          QUIET_HOURS: ${{ vars.QUIET_HOURS }}
+          MODE: ${{ inputs.mode || 'normal' }}
+        run: |
+          case "$MODE" in
+            no-push) python -m news_bot.main --no-push ;;
+            dry-run) python -m news_bot.main --dry-run ;;
+            check-sources) python -m news_bot.check_sources ;;
+            *)       python -m news_bot.main ;;
+          esac

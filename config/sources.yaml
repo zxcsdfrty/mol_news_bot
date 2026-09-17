@@ -1,0 +1,63 @@
+# 新聞來源設定
+# type: rss         → 一般 RSS/Atom feed（各媒體官方提供）
+# type: google_news → Google 新聞 RSS 關鍵字搜尋（補足沒有 RSS 或 RSS 不完整的媒體）
+#
+# ⚠ 各媒體 RSS 網址偶有異動，上線前請逐一以瀏覽器確認可開啟；
+#   失效的來源程式會記錄 warning 並略過，不會中斷整體流程。
+
+rss:
+  - name: 中央社
+    url: https://feeds.feedburner.com/rsscna/politics
+  - name: 中央社
+    url: https://feeds.feedburner.com/rsscna/finance
+  - name: 中央社
+    url: https://feeds.feedburner.com/rsscna/social
+  - name: 中央社
+    url: https://feeds.feedburner.com/rsscna/local
+  - name: 自由時報
+    url: https://news.ltn.com.tw/rss/politics.xml
+  - name: 自由時報
+    url: https://news.ltn.com.tw/rss/life.xml
+  - name: 自由時報
+    url: https://news.ltn.com.tw/rss/society.xml
+  - name: 自由財經
+    url: https://news.ltn.com.tw/rss/business.xml
+  - name: 公視新聞網
+    url: https://news.pts.org.tw/xml/newsfeed.xml
+  - name: 聯合新聞網
+    url: https://udn.com/rssfeed/news/2/6638   # 要聞
+  - name: 聯合新聞網
+    url: https://udn.com/rssfeed/news/2/6639   # 社會
+  - name: 經濟日報
+    url: https://money.udn.com/rssfeed/news/1001/5591
+  - name: 中時新聞網
+    url: https://www.chinatimes.com/rss/realtimenews-politic.xml
+  - name: 中時新聞網
+    url: https://www.chinatimes.com/rss/realtimenews-society.xml
+  - name: 工商時報
+    url: https://www.ctee.com.tw/rss_web/livenews/policy
+  - name: 風傳媒
+    url: https://www.storm.mg/api/getRss/channel_id/2
+  # 部內新聞稿本身，方便新聞聯絡室比對媒體露出。
+  # 請至勞動部全球資訊網「RSS 訂閱」頁取得正確網址後取消註解。
+  # - name: 勞動部新聞稿
+  #   url: https://www.mol.gov.tw/<新聞稿RSS路徑>
+
+# Google 新聞 RSS：每個 query 會組成
+#   https://news.google.com/rss/search?q=<query>+when:1d&hl=zh-TW&gl=TW&ceid=TW:zh-Hant
+# 可涵蓋 ETtoday、TVBS、三立、民視、鏡週刊、NOWnews 等未提供穩定 RSS 的媒體。
+google_news:
+  when: 1d
+  queries:
+    - 勞動部
+    - 勞保局
+    - 勞動力發展署
+    - 職安署
+    - 洪申翰
+    - 基本工資
+    - 勞保 年金
+    - 勞退 新制
+    - 移工
+    - 職災
+    - 勞資爭議
+    - 育嬰留職停薪
