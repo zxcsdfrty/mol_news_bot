@@ -20,6 +20,12 @@ from .config import load_yaml, settings
 from .fetcher import GOOGLE_NEWS, UA, clean_text
 
 
+def _repr(v, limit: int = 40) -> str:
+    """診斷用：顯示原始值（含空白與特殊字元），過長則截斷。"""
+    s = repr(v)
+    return s if len(s) <= limit else s[:limit] + "…"
+
+
 def usable_entries(entries) -> int:
     """實際抓得進來的則數：_fetch_rss 會丟掉缺標題或缺連結的項目。"""
     return sum(1 for e in entries
@@ -43,10 +49,12 @@ def _check(name: str, url: str) -> dict:
             if getattr(feed, "bozo", 0) and getattr(feed, "bozo_exception", None):
                 r["note"] = type(feed.bozo_exception).__name__
             elif r["entries"] and not r["usable"]:
-                # 列出第一則實際有哪些欄位，用以分辨「沒有 title 欄位」
-                # 與「有 title 但內容是空的」
-                keys = ",".join(sorted(feed.entries[0].keys()))[:90]
-                r["note"] = f"項目缺標題或連結；欄位: {keys}"
+                # 印出第一則的原始 title / link，用以判斷是欄位不存在、
+                # 值為空，還是被 clean_text 清掉
+                e0 = feed.entries[0]
+                r["note"] = (f"title={_repr(e0.get('title'))} "
+                             f"link={_repr(e0.get('link'))} "
+                             f"清理後={_repr(clean_text(e0.get('title')))}")
             r["ok"] = r["usable"] > 0
             if not r["ok"]:
                 r["status"] += " 無可用項目"
