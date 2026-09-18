@@ -62,6 +62,9 @@ def main() -> int:
     g = cfg.get("google_news") or {}
     targets += [(f"Google新聞:{q}", GOOGLE_NEWS.format(q=quote_plus(q), when=g.get("when", "1d")))
                 for q in g.get("queries") or []]
+    # candidates：來源失效時用來測試替代網址。只有這裡會檢查，fetch_all 不會抓，
+    # 確認可用後再搬進 rss。
+    targets += [(f"候選:{s['name']}", s["url"]) for s in cfg.get("candidates") or []]
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda t: _check(*t), targets))

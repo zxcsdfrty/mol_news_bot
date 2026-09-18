@@ -93,3 +93,35 @@ aggregators:
   - 蕃新聞
   - 新浪
   - 頭條日報
+
+# 候選網址：來源失效時在此列出可能的替代網址，以
+#   python -m news_bot.check_sources
+# （或 Actions 的 mode=check-sources）檢查「可用」欄是否 > 0，
+# 確認後再搬進上方 rss，並把失效的那筆註解掉。
+# fetch_all 不會抓取這一區，放著不影響正式執行。
+candidates:
+  # 聯合新聞網：現行網址回 200 且有 20 則，但每則都沒有標題
+  - name: udn要聞-ch參數
+    url: https://udn.com/rssfeed/news/2/6638?ch=news
+  - name: udn社會-ch參數
+    url: https://udn.com/rssfeed/news/2/6639?ch=news
+  - name: udn即時-1
+    url: https://udn.com/rssfeed/news/1?ch=news
+  - name: udn即時-2
+    url: https://udn.com/rssfeed/news/2?ch=news
+  # 中時新聞網：politic 回 502、society 回 404
+  - name: 中時-realtimenews
+    url: https://www.chinatimes.com/rss/realtimenews.xml
+  - name: 中時-politic
+    url: https://www.chinatimes.com/rss/politic.xml
+  - name: 中時-society
+    url: https://www.chinatimes.com/rss/society.xml
+  - name: 中時-money
+    url: https://www.chinatimes.com/rss/money.xml
+  # 風傳媒：現行 API 網址回 200 但無項目
+  - name: 風傳媒-feeds-all
+    url: https://www.storm.mg/feeds/all
+  - name: 風傳媒-rss
+    url: https://www.storm.mg/rss
+  - name: 風傳媒-channel1
+    url: https://www.storm.mg/api/getRss/channel_id/1
