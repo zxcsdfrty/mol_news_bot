@@ -24,20 +24,30 @@ rss:
     url: https://news.ltn.com.tw/rss/business.xml
   - name: 公視新聞網
     url: https://news.pts.org.tw/xml/newsfeed.xml
-  - name: 聯合新聞網
-    url: https://udn.com/rssfeed/news/2/6638   # 要聞
-  - name: 聯合新聞網
-    url: https://udn.com/rssfeed/news/2/6639   # 社會
+  # 聯合新聞網（2026-09-18 停用）：回 HTTP 200 且解析得到 20 則，但每一則的
+  # title 與 link 原始值都是空字串（'' ''），等於空殼項目，一則都抓不進來。
+  # 已測 ?ch=news 參數版、/rssfeed/news/1、/rssfeed/news/2 等變化，症狀一致，
+  # 故非網址問題。同集團的經濟日報（money.udn.com）正常，僅 udn.com 本站異常。
+  # 聯合報系新聞目前改由下方 Google 新聞查詢涵蓋。
+  # - name: 聯合新聞網
+  #   url: https://udn.com/rssfeed/news/2/6638   # 要聞
+  # - name: 聯合新聞網
+  #   url: https://udn.com/rssfeed/news/2/6639   # 社會
   - name: 經濟日報
     url: https://money.udn.com/rssfeed/news/1001/5591
-  - name: 中時新聞網
-    url: https://www.chinatimes.com/rss/realtimenews-politic.xml
-  - name: 中時新聞網
-    url: https://www.chinatimes.com/rss/realtimenews-society.xml
+  # 中時新聞網（2026-09-18 停用）：society 固定回 404，politic 時而 502 時而正常。
+  # 已測 realtimenews.xml、politic.xml、society.xml、money.xml，全部 404，
+  # 研判官方已不再提供 RSS。中時新聞改由下方 Google 新聞查詢涵蓋。
+  # - name: 中時新聞網
+  #   url: https://www.chinatimes.com/rss/realtimenews-politic.xml
+  # - name: 中時新聞網
+  #   url: https://www.chinatimes.com/rss/realtimenews-society.xml
   - name: 工商時報
     url: https://www.ctee.com.tw/rss_web/livenews/policy
-  - name: 風傳媒
-    url: https://www.storm.mg/api/getRss/channel_id/2
+  # 風傳媒（2026-09-18 停用）：API 端點回 200 但無任何項目，
+  # /feeds/all 與 /rss 皆 404。風傳媒新聞改由下方 Google 新聞查詢涵蓋。
+  # - name: 風傳媒
+  #   url: https://www.storm.mg/api/getRss/channel_id/2
   # 部內新聞稿本身，方便新聞聯絡室比對媒體露出。
   # 請至勞動部全球資訊網「RSS 訂閱」頁取得正確網址後取消註解。
   # - name: 勞動部新聞稿
@@ -93,3 +103,10 @@ aggregators:
   - 蕃新聞
   - 新浪
   - 頭條日報
+
+# 候選網址：來源失效時在此列出可能的替代網址，以
+#   python -m news_bot.check_sources
+# （或 Actions 的 mode=check-sources）檢查「可用」欄是否 > 0，
+# 確認後再搬進上方 rss，並把失效的那筆註解掉。
+# fetch_all 不會抓取這一區，放著不影響正式執行。
+candidates: []

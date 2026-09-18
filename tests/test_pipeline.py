@@ -218,6 +218,20 @@ def test_dedupe_prefers_original_outlet_over_aggregator():
     assert len(out) == 1 and out[0].source == "中央社"
 
 
+def test_usable_entries():
+    """解析得到的則數不等於抓得進來的則數（聯合新聞網回 20 則但每則無標題）。"""
+    from news_bot.check_sources import usable_entries
+    entries = [
+        {"title": "勞動部公布基本工資", "link": "https://a/1"},   # 可用
+        {"title": "", "link": "https://a/2"},                    # 無標題，會被丟棄
+        {"title": "   ", "link": "https://a/3"},                 # 只有空白
+        {"title": "勞保局說明", "link": ""},                      # 無連結
+        {"title": "職安署稽查", "link": "https://a/5"},           # 可用
+    ]
+    assert len(entries) == 5
+    assert usable_entries(entries) == 2
+
+
 def test_redact_token():
     """日誌不得洩漏 Bot Token（公開 repo 的 Actions 紀錄任何人都看得到）。"""
     token = "123456789:AAFakeTokenForTestOnly"  # noqa: S105 假 token，僅供測試
