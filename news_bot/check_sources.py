@@ -43,7 +43,10 @@ def _check(name: str, url: str) -> dict:
             if getattr(feed, "bozo", 0) and getattr(feed, "bozo_exception", None):
                 r["note"] = type(feed.bozo_exception).__name__
             elif r["entries"] and not r["usable"]:
-                r["note"] = "項目缺標題或連結"
+                # 列出第一則實際有哪些欄位，用以分辨「沒有 title 欄位」
+                # 與「有 title 但內容是空的」
+                keys = ",".join(sorted(feed.entries[0].keys()))[:90]
+                r["note"] = f"項目缺標題或連結；欄位: {keys}"
             r["ok"] = r["usable"] > 0
             if not r["ok"]:
                 r["status"] += " 無可用項目"
